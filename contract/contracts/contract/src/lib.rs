@@ -1,68 +1,71 @@
 #![no_std]
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String};
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol, Vec};
+#[contracttype]
+pub enum DataKey {
+    Votes,
+    Voters,
+}
 
 #[contract]
-pub struct VotingContract;
+pub struct Contract;
 
 #[contractimpl]
-impl VotingContract {
-    pub fn init(env: Env, candidates: Vec<Symbol>) {
-        if env.storage().instance().has(&symbol_short!("INIT")) {
-            panic!("Already initialized");
-        }
-
-        env.storage().instance().set(&symbol_short!("CANDS"), &candidates);
-
-        for c in candidates.iter() {
-            env.storage().instance().set(&c, &0u32);
-        }
-
-        env.storage().instance().set(&symbol_short!("INIT"), &true);
-    }
-
-    pub fn vote(env: Env, voter: Address, candidate: Symbol) {
+impl Contract {
+    /// Vote for any candidate. Candidate is created automatically on first vote.
+    /// Each voter can only vote once (for any candidate).
+    pub fn vote(env: Env, voter: Address, candidate: String) {
         voter.require_auth();
 
-        // Check initialized
-        if !env.storage().instance().has(&symbol_short!("INIT")) {
-            panic!("Not initialized");
-        }
-
-        // Prevent double voting using string key
-        let voter_key = symbol_short!("VOTED");
-
-        let mut voted: Vec<Address> = env
+        // Check if voter already voted
+        let mut voters: Map<Address, bool> = env
             .storage()
             .instance()
-            .get(&voter_key)
-            .unwrap_or(Vec::new(&env));
+            .get(&DataKey::Voters)
+            .unwrap_or(Map::new(&env));
 
-        // manual loop instead of contains()
-        for v in voted.iter() {
-            if v == voter {
-                panic!("Already voted");
-            }
+        if voters.get(voter.clone()).unwrap_or(false) {
+            panic!("already voted");
         }
 
-        // Get current votes
-        let count: u32 = env
+        // Get or create votes map
+        let mut votes: Map<String, u32> = env
             .storage()
             .instance()
-            .get(&candidate)
-            .unwrap_or(0);
+            .get(&DataKey::Votes)
+            .unwrap_or(Map::new(&env));
 
-        env.storage().instance().set(&candidate, &(count + 1));
+        // Increment vote count for candidate (creates if doesn't exist)
+        let count = votes.get(candidate.clone()).unwrap_or(0);
+        votes.set(candidate, count + 1);
 
-        // Save voter
-        voted.push_back(voter);
-        env.storage().instance().set(&voter_key, &voted);
+        // Mark voter as having voted
+        voters.set(voter, true);
+
+        // Save state
+        env.storage().instance().set(&DataKey::Votes, &votes);
+        env.storage().instance().set(&DataKey::Voters, &voters);
     }
 
-    pub fn get_votes(env: Env, candidate: Symbol) -> u32 {
-        env.storage()
+    /// Get vote count for a candidate. Returns 0 if candidate doesn't exist.
+    pub fn get_votes(env: Env, candidate: String) -> u32 {
+        let votes: Map<String, u32> = env
+            .storage()
             .instance()
-            .get(&candidate)
-            .unwrap_or(0)
+            .get(&DataKey::Votes)
+            .unwrap_or(Map::new(&env));
+        votes.get(candidate).unwrap_or(0)
+    }
+
+    /// Check if an address has already voted.
+    pub fn has_voted(env: Env, voter: Address) -> bool {
+        let voters: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Voters)
+            .unwrap_or(Map::new(&env));
+        voters.get(voter).unwrap_or(false)
     }
 }
+
+mod test;
