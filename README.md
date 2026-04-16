@@ -150,7 +150,7 @@ soroban contract invoke \
 
 ## 🧑‍💻 Author
 
-Your Name
+Mohor Ghosh 
 
 ---
 
